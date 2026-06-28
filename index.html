@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RU Finance</title>
+    <style>
+        :root {
+            --bg-color: #f9f9fa; --surface: #ffffff; --text-main: #111827; 
+            --text-muted: #6b7280; --border: #e5e7eb; --accent: #0f172a;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color); color: var(--text-main);
+            max-width: 900px; margin: 0 auto; padding: 40px 20px; line-height: 1.5;
+        }
+        header { margin-bottom: 30px; }
+        h1 { font-size: 24px; font-weight: 600; margin-bottom: 20px; letter-spacing: -0.5px; }
+        
+        .controls { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 30px; position: relative; z-index: 10; }
+        input[type="text"] {
+            padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px;
+            background-color: var(--surface); font-size: 14px; color: var(--text-main);
+            outline: none; transition: border-color 0.2s ease; flex-grow: 1; min-width: 250px;
+        }
+        input[type="text"]:focus { border-color: var(--accent); }
+
+        .multi-select { position: relative; display: inline-block; min-width: 200px; user-select: none; }
+        .select-box {
+            padding: 10px 14px; border: 1px solid var(--border); border-radius: 6px;
+            background-color: var(--surface); font-size: 14px; cursor: pointer;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .select-box::after { content: "▼"; font-size: 10px; margin-left: 10px; color: var(--text-muted); }
+        .options-list {
+            position: absolute; top: 100%; left: 0; right: 0; background: var(--surface);
+            border: 1px solid var(--border); border-radius: 6px; margin-top: 4px;
+            max-height: 250px; overflow-y: auto; display: none; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            z-index: 100; padding: 5px 0;
+        }
+        .options-list.visible { display: block; }
+        .options-list label { display: flex; align-items: center; padding: 8px 14px; font-size: 14px; cursor: pointer; transition: background 0.15s; }
+        .options-list label:hover { background-color: #f3f4f6; }
+        .options-list input[type="checkbox"] { margin-right: 10px; cursor: pointer; }
+
+        .file-list {
+            list-style: none; padding: 0; margin: 0; background: var(--surface);
+            border: 1px solid var(--border); border-radius: 8px; position: relative; z-index: 1;
+        }
+        .file-item {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 16px 20px; border-bottom: 1px solid var(--border);
+            text-decoration: none; color: var(--text-main); transition: background-color 0.15s ease;
+        }
+        .file-item:last-child { border-bottom: none; }
+        .file-item:hover { background-color: #f3f4f6; }
+        .file-name { font-weight: 500; font-size: 15px; }
+        .file-course-title { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+        .file-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-muted); justify-content: flex-end; }
+        .tag { background-color: var(--bg-color); padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); white-space: nowrap; text-transform: capitalize; }
+        .empty-state { text-align: center; padding: 40px; color: var(--text-muted); }
+        .error-tag { color: #dc2626; border-color: #f87171; background-color: #fef2f2; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Course Materials</h1>
+        <div class="controls">
+            <input type="text" id="searchInput" placeholder="Search topics, markers, or details...">
+            
+            <div class="multi-select" id="semesterFilter">
+                <div class="select-box">Semesters (All)</div>
+                <div class="options-list" id="semesterOptions">
+                    </div>
+            </div>
+
+            <div class="multi-select" id="courseFilter">
+                <div class="select-box">Courses (All)</div>
+                <div class="options-list" id="courseOptions">
+                    </div>
+            </div>
+
+            <div class="multi-select" id="typeFilter">
+                <div class="select-box">Categories (All)</div>
+                <div class="options-list" id="categoryOptions">
+                    </div>
+            </div>
+        </div>
+    </header>
+
+    <ul class="file-list" id="fileList"></ul>
+
+    <script>
+        let database = [];
+        let courseDictionary = {};
+        let flatCourseMapping = {}; 
+
+        const fileList = document.getElementById('fileList');
+        const searchInput = document.getElementById('searchInput');
+
+        // Setup Dropdown Menus
+        document.querySelectorAll('.multi-select').forEach(dropdown => {
+            const box = dropdown.querySelector('.select-box');
+            const list = dropdown.querySelector('.options-list');
+            const originalTitle = box.innerText.replace(' (All)', '');
+
+            box.addEventListener('click', (e) => {
+                e.stopPropagation();
+                document.querySelectorAll('.options-list').forEach(l => { if (l !== list) l.classList.remove('visible'); });
+                list.classList.toggle('visible');
+            });
+
+            list.addEventListener('click', (e) => { e.stopPropagation(); });
+
+            list.addEventListener('change', () => {
+                const checkedCount = list.querySelectorAll('input:checked').length;
+                if (checkedCount === 0) box.innerText = `${originalTitle} (All)`;
+                else if (checkedCount === 1) box.innerText = `${originalTitle} (1 Selected)`;
+                else box.innerText = `${originalTitle} (${checkedCount} Selected)`;
+                applyFilters();
+            });
+        });
+
+        document.addEventListener('click', () => {
+            document.querySelectorAll('.options-list').forEach(l => l.classList.remove('visible'));
+        });
+
+        async function loadData() {
+            try {
+                const timestamp = new Date().getTime(); 
+                const [dbResponse, courseResponse] = await Promise.all([
+                    fetch(`data.json?v=${timestamp}`).catch(() => ({ ok: false })),
+                    fetch(`courses.json?v=${timestamp}`).catch(() => ({ ok: false }))
+                ]);
+
+                if (dbResponse.ok) database = await dbResponse.json();
+                if (courseResponse.ok) courseDictionary = await courseResponse.json();
+
+                buildCourseMapping();
+                populateDropdowns();
+                applyFilters();
+            } catch (error) {
+                fileList.innerHTML = '<li class="empty-state">System Error. Ensure JSON files exist.</li>';
+            }
+        }
+
+        function buildCourseMapping() {
+            for (const semester in courseDictionary) {
+                for (const [code, name] of Object.entries(courseDictionary[semester])) {
+                    flatCourseMapping[code.toUpperCase()] = name;
+                }
+            }
+        }
+
+        // Normalize category/marker values so the UI stays consistent even if data.json has mixed values
+        const labelMap = {
+            book: "Book",
+            textbook: "Textbook",
+            assignment: "Assignment",
+            misc: "Misc",
+            notes: "Notes",
+            note: "Notes",
+            question: "Question",
+            questions: "Question",
+            slide: "Slide",
+            slides: "Slide",
+            sheet: "Sheet",
+            syllabus: "Syllabus"
+        };
+
+        // Converts raw text into a clean key: "Textbook" -> "textbook", "ALL_NOTES" -> "all notes"
+        function cleanKey(value) {
+            return (value || "").toString().toLowerCase().replace(/_/g, ' ').trim();
+        }
+
+        function toTitleCase(value) {
+            return cleanKey(value).replace(/\b\w/g, char => char.toUpperCase());
+        }
+
+        // Finds the best category for filtering and the right-side category tag
+        function getDisplayCategory(file) {
+            const rawCategory = cleanKey(file.category);
+            const rawMarker = cleanKey(file.marker);
+            const rawFilename = cleanKey(file.filename);
+
+            // If category is missing/misc but marker clearly says what it is, use marker as category
+            if (!rawCategory || rawCategory === "misc") {
+                if (["textbook", "book"].includes(rawMarker)) return "book";
+                if (rawMarker === "assignment") return "assignment";
+                if (["notes", "note", "class note", "class notes"].includes(rawMarker)) return "notes";
+                if (["slide", "slides"].includes(rawMarker)) return "slide";
+                if (["question", "questions"].includes(rawMarker)) return "question";
+
+                // Filename fallback: useful when data.json is generated from file names
+                if (rawFilename.includes("book") || rawFilename.includes("textbook")) return "book";
+                if (rawFilename.includes("assignment")) return "assignment";
+                if (rawFilename.includes("note")) return "notes";
+                if (rawFilename.includes("slide")) return "slide";
+                if (rawFilename.includes("question")) return "question";
+            }
+
+            return rawCategory || "misc";
+        }
+
+        function getCategoryLabel(file) {
+            const category = getDisplayCategory(file);
+            return labelMap[category] || toTitleCase(category);
+        }
+
+        // Shows the small bracket text after title, e.g. (Textbook), but avoids useless duplicates
+        function getMarkerLabel(file) {
+            const marker = cleanKey(file.marker);
+            const category = getDisplayCategory(file);
+            if (!marker) return labelMap[category] || toTitleCase(category);
+
+            const markerLabel = labelMap[marker] || toTitleCase(marker);
+            const categoryLabel = labelMap[category] || toTitleCase(category);
+
+            // If marker and category mean the same thing, show only one clean label
+            if (markerLabel.toLowerCase() === categoryLabel.toLowerCase()) return categoryLabel;
+            if (category === "book" && marker === "textbook") return "Textbook";
+
+            return markerLabel;
+        }
+
+
+        // Data-Driven Population for ALL filters
+        function populateDropdowns() {
+            const semesterSet = new Set();
+            const courseSet = new Set();
+            const categorySet = new Set();
+
+            database.forEach(f => { 
+                if (f.status === "OK") {
+                    if(f.semester) semesterSet.add(f.semester.toLowerCase().trim());
+                    if(f.course) courseSet.add(f.course.toUpperCase().trim());
+                    categorySet.add(getDisplayCategory(f));
+                }
+            });
+            
+            // Generate Semesters
+            const sortedSemesters = Array.from(semesterSet).sort();
+            const semesterHTML = sortedSemesters.map(sem => {
+                const cleanSem = sem.replace(/_/g, ' '); 
+                return `<label><input type="checkbox" value="${sem}"> <span style="text-transform: capitalize;">${cleanSem}</span></label>`;
+            }).join('');
+            document.getElementById('semesterOptions').innerHTML = semesterHTML || '<label style="color:#9ca3af; padding-left:14px;">No semesters found.</label>';
+
+            // Generate Courses
+            const sortedCourses = Array.from(courseSet).sort();
+            const courseHTML = sortedCourses.map(code => {
+                const fullName = flatCourseMapping[code] ? `${code} - ${flatCourseMapping[code]}` : code;
+                return `<label><input type="checkbox" value="${code}"> ${fullName}</label>`;
+            }).join('');
+            document.getElementById('courseOptions').innerHTML = courseHTML || '<label style="color:#9ca3af; padding-left:14px;">No courses found.</label>';
+
+            // Generate Categories
+            const sortedCategories = Array.from(categorySet).sort();
+            const categoryHTML = sortedCategories.map(cat => {
+                const label = labelMap[cat] || toTitleCase(cat);
+                return `<label><input type="checkbox" value="${cat}"> ${label}</label>`;
+            }).join('');
+            document.getElementById('categoryOptions').innerHTML = categoryHTML || '<label style="color:#9ca3af; padding-left:14px;">No categories found.</label>';
+        }
+
+        function getSelectedValues(dropdownId) {
+            return Array.from(document.querySelectorAll(`#${dropdownId} input:checked`)).map(cb => cb.value);
+        }
+
+        function renderFiles(files) {
+            fileList.innerHTML = '';
+            if (files.length === 0) {
+                fileList.innerHTML = '<li class="empty-state">No files match your current filters.</li>';
+                return;
+            }
+
+            files.forEach(file => {
+                const li = document.createElement('a');
+                li.href = file.path || '#'; 
+                li.className = 'file-item';
+                li.target = '_blank';
+                
+                if (file.status === "Error") {
+                    li.innerHTML = `
+                        <div class="file-name">${file.filename || "Unknown File"}</div>
+                        <div class="file-meta">
+                            <span class="tag error-tag">Naming Format Error</span>
+                            <span class="tag">${(file.semester || "Unknown").replace(/_/g, ' ')}</span>
+                        </div>
+                    `;
+                } else {
+                    const cleanDetail = (file.detail || "No Detail").replace(/_/g, ' ');
+                    const cleanMarker = getMarkerLabel(file);
+                    const safeCourse = (file.course || "Unknown").toUpperCase();
+                    const courseDisplay = flatCourseMapping[safeCourse] ? `${safeCourse} - ${flatCourseMapping[safeCourse]}` : safeCourse;
+                    
+                    li.innerHTML = `
+                        <div>
+                            <span class="file-course-title">${courseDisplay}</span>
+                            <div class="file-name">${cleanDetail} <span style="color:#9ca3af; font-size: 13px;">(${cleanMarker})</span></div>
+                        </div>
+                        <div class="file-meta">
+                            <span class="tag">${(file.semester || "").replace(/_/g, ' ')}</span>
+                            <span class="tag">${getCategoryLabel(file)}</span>
+                        </div>
+                    `;
+                }
+                fileList.appendChild(li);
+            });
+        }
+
+        function applyFilters() {
+            const searchTerm = searchInput.value.toLowerCase().trim();
+            
+            const selectedSemesters = getSelectedValues('semesterFilter');
+            const selectedCourses = getSelectedValues('courseFilter').map(c => c.toLowerCase());
+            const selectedCategories = getSelectedValues('typeFilter');
+
+            const filtered = database.filter(file => {
+                if (file.status === "Error") return (file.filename || "").toLowerCase().includes(searchTerm);
+
+                // Extract and normalize data directly from the file to ensure an exact string match
+                const fSemester = (file.semester || "").toLowerCase().trim();
+                const fCourse = (file.course || "").toLowerCase().trim();
+                const fCategory = getDisplayCategory(file);
+
+                const courseName = (flatCourseMapping[(file.course || "").toUpperCase()] || "").toLowerCase();
+                const searchableFilename = (file.filename || "").toLowerCase().replace(/_/g, ' ');
+                const searchableDetail = (file.detail || "").toLowerCase().replace(/_/g, ' ');
+                const searchableMarker = (file.marker || "").toLowerCase().replace(/_/g, ' ');
+                const searchableCategory = getCategoryLabel(file).toLowerCase();
+
+                const matchesSearch = 
+                    searchableFilename.includes(searchTerm) || 
+                    searchableDetail.includes(searchTerm) ||
+                    searchableMarker.includes(searchTerm) ||
+                    searchableCategory.includes(searchTerm) ||
+                    courseName.includes(searchTerm) ||
+                    fCourse.includes(searchTerm);
+                    
+                const matchesSemester = selectedSemesters.length === 0 || selectedSemesters.includes(fSemester);
+                const matchesCourse = selectedCourses.length === 0 || selectedCourses.includes(fCourse);
+                const matchesType = selectedCategories.length === 0 || selectedCategories.includes(fCategory);
+                
+                return matchesSearch && matchesSemester && matchesCourse && matchesType;
+            });
+
+            renderFiles(filtered);
+        }
+
+        searchInput.addEventListener('input', applyFilters);
+        loadData();
+    </script>
+    <!-- Made by Ornob -->
+</body>
+</html>
